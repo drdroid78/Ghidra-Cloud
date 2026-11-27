@@ -1,5 +1,8 @@
 name: Reverse Engineering Toolbox
+run-name: ${{ github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow }}
 on:
+  issues:
+    types: [opened]
   push:
     branches: [main]
     paths: ['toolbox/**', '.github/workflows/toolbox.yml']
@@ -47,6 +50,7 @@ permissions:
   contents: read
 jobs:
   toolbox:
+    if: github.event_name != 'issues' || (github.event.issue.title == 'Ghidra Toolbox request' && github.event.issue.user.id == 62127032 && github.event.sender.id == 62127032 && github.event.issue.author_association == 'OWNER')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -65,6 +69,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Validate owner request
+        id: request
+        if: github.event_name == 'issues'
+        env:
+          REQUEST_KIND: toolbox
+        run: python3 toolbox/issue_request.py
       - name: Install verified Ghidra
         run: bash scripts/install.sh
       - name: Install eight analyzers
