@@ -21,5 +21,5 @@ rm -rf ghidra_12.2_PUBLIC
 unzip -q ghidra.zip
 rm ghidra.zip
 test -x ghidra_12.2_PUBLIC/support/analyzeHeadless
-printf '%s\\n' '2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67' > ghidra_12.2_PUBLIC/.ghidra-cloud-verified
+printf '%s\n' '2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67' > ghidra_12.2_PUBLIC/.ghidra-cloud-verified
 echo 'Ghidra 12.2 archive verified; owner-approved install complete'
