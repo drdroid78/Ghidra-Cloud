@@ -94,13 +94,15 @@ jobs:
           clean: true
           persist-credentials: false
       - name: Download temporary binary from GitHub Release
-        if: inputs.release_tag != ''
+        if: inputs.release_tag != '' || steps.request.outputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || steps.request.outputs.release_tag }}
         run: |
           mkdir -p uploads
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "libstardroid.so" --dir uploads --clobber
           test -s uploads/libstardroid.so
+          echo "INPUT_PATH=uploads/libstardroid.so" >> "$GITHUB_ENV"
       - name: Install verified Ghidra
         run: bash scripts/install.sh
       - name: Run static analysis and verification
