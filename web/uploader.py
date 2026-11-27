@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from flask import Flask, Response, abort, jsonify, render_template, request, session, stream_with_context
 from werkzeug.exceptions import HTTPException
+from scripts import esp_image
 from web.github_lease import CredentialLease
 
 MIB = 1024 * 1024
@@ -59,7 +60,7 @@ def inspect_upload(stream, name):
         fmt = "dex"
     elif head[:4].hex() in {"d4c3b2a1", "a1b2c3d4", "4d3cb2a1", "a1b23c4d", "0a0d0d0a"}:
         fmt = "pcap"
-    elif head.startswith(b"PK") or extension in {".zip", ".apk", ".jar"}:
+    elif head[:4] in {b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"} or extension in {".zip", ".apk", ".jar"}:
         try:
             with zipfile.ZipFile(stream) as archive:
                 names = set()
@@ -88,8 +89,10 @@ def inspect_upload(stream, name):
         fmt = "hex"
     elif re.match(rb"S[0-9][0-9a-fA-F]{6,}", head):
         fmt = "srec"
-    elif head[0] == 0xE9 and len(head) >= 24 and 1 <= head[1] <= 16:
-        fmt = "esp-candidate"
+    else:
+        esp = esp_image.images(stream)
+        if esp:
+            fmt = "esp" if any(image["elf_supported"] for image in esp) else "esp-unknown"
     stream.seek(0)
     digest = hashlib.file_digest(stream, "sha256").hexdigest()
     stream.seek(0)
@@ -226,6 +229,8 @@ class GitHub:
 
 
 def options_from(data):
+    if any(not isinstance(data.get(key, ""), str) for key in ("raw_language", "raw_base", "raw_entry", "raw_compiler")):
+        raise InputError("Некорректные параметры RAW")
     language = data.get("raw_language", "").strip()
     if not language:
         return {}
@@ -333,7 +338,8 @@ def create_app(overrides=None):
         password = app.config["APP_PASSWORD"]
         if not password or not app.secret_key:
             return jsonify(error="Вход пока не настроен"), 503
-        supplied = (request.get_json(silent=True) or {}).get("password", "")
+        credentials = request.get_json(silent=True)
+        supplied = credentials.get("password", "") if isinstance(credentials, dict) else ""
         if not isinstance(supplied, str) or len(supplied) > 512:
             abort(403)
         with login_lock:
@@ -427,6 +433,8 @@ def create_app(overrides=None):
     @app.post("/api/runs")
     def start():
         data = request.get_json()
+        if not isinstance(data, dict):
+            raise InputError("Некорректные параметры анализа")
         mode = data.get("mode")
         if mode not in {"analyze", "compare", "resume", "toolbox"}:
             raise InputError("Неизвестный режим")
@@ -472,13 +480,15 @@ def create_app(overrides=None):
         run = gh.run(run_id)
         if action not in {"cancel", "rerun"}:
             abort(404)
-        if action == "rerun" and TITLE.fullmatch(run["display_title"])[3] != "resume":
+        gh.ensure_private(write=True)
+        with job_lock:
             match = TITLE.fullmatch(run["display_title"])
-            for file_id in filter(None, match.groups()[:2]):
-                release = gh.release(file_id)
-                if not release or not any(asset["name"] == ASSET_NAME and asset["state"] == "uploaded" for asset in release["assets"]):
-                    return jsonify(error="Исходный файл удалён. Для повторного запуска загрузите его снова."), 409
-        gh.call("POST", f"/actions/runs/{run_id}/{action}")
+            if action == "rerun" and match[3] != "resume":
+                for file_id in filter(None, match.groups()[:2]):
+                    release = gh.release(file_id)
+                    if not release or not any(asset["name"] == ASSET_NAME and asset["state"] == "uploaded" for asset in release["assets"]):
+                        return jsonify(error="Исходный файл удалён. Для повторного запуска загрузите его снова."), 409
+            gh.call("POST", f"/actions/runs/{run_id}/{action}")
         return jsonify(ok=True), 202
 
     def allowed_artifact(gh, run_id, artifact_id):

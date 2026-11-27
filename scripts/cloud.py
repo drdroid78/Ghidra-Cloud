@@ -11,6 +11,7 @@ import sys
 import tarfile
 from collections import Counter
 from pathlib import Path
+import esp_image
 
 ROOT = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
 WORK = Path(os.environ["RUNNER_TEMP"]) / "ghidra-cloud"
@@ -201,6 +202,27 @@ def package():
         t.add(PROJECT,arcname="project")
     print("PROJECT_SAVED",target.stat().st_size,flush=True)
 
+
+def mapped_image(path, label):
+    if path.suffix != ".esp":
+        return path
+    report = REPORT / "inputs" / label
+    report.mkdir(parents=True, exist_ok=True)
+    with path.open("rb") as source:
+        images = esp_image.images(source)
+        supported = [image for image in images if image["elf_supported"]]
+        chosen = next((image for image in supported if image["offset"] == 0x10000), None) or (supported[-1] if supported else None)
+        (report / "esp-image.json").write_text(json.dumps({
+            "images": images, "selected_offset": chosen["offset"] if chosen else None,
+            "note": "Executable flags use the detected chip memory map and the original entry point. Flash gaps are not imported.",
+        }, indent=2))
+        if not chosen:
+            raise ValueError("ESP chip or memory map is uncertain")
+        target = WORK / f"{label}-mapped.elf"
+        with target.open("wb") as output:
+            esp_image.write_elf(source, chosen, output)
+    return target
+
 def restore(run_id):
     if not re.fullmatch(r"[1-9][0-9]{0,19}",run_id):
         raise ValueError("Invalid run ID")
@@ -355,11 +377,11 @@ def main():
         web_input=bool(os.getenv("UPLOAD_ID"))
         raw=(language,os.environ["RAW_BASE"],os.environ["RAW_ENTRY"],os.getenv("RAW_COMPILER","default")) if language else None
         raw_a=None if web_input and a.suffix.lower() != ".bin" else raw
-        ra=analyze(a,"a",filt,query,limit,raw_a,pair=mode=="compare")
+        ra=analyze(mapped_image(a,"a") if web_input else a,"a",filt,query,limit,raw_a,pair=mode=="compare")
         if mode=="compare":
             b=input_path(os.environ["COMPARE_PATH"])
             raw_b=None if web_input and b.suffix.lower() != ".bin" else raw
-            rb=analyze(b,"b",filt,query,limit,raw_b,pair=True)
+            rb=analyze(mapped_image(b,"b") if web_input else b,"b",filt,query,limit,raw_b,pair=True)
             compare(a,b,ra,rb)
             if not web_input or info(ra)["LANGUAGE"] == info(rb)["LANGUAGE"]:
                 version_tracking()

@@ -25,6 +25,7 @@ let pending = [];
 let state = {uploads: [], runs: []};
 let busy = false;
 let polling = false;
+let refreshQueued = false;
 let inspected = null;
 let nextPollUntil = 0;
 const selected = new Set();
@@ -174,8 +175,8 @@ function start(first, mode, extra = {}) {
 }
 
 function automatic(file) {
-  return ["elf", "pe", "macho", "hex", "srec", "esp-candidate"].includes(file.format)
-    || (file.format === "raw" && $("raw_language").value.trim()) ? "analyze" : "toolbox";
+  return ["elf", "pe", "macho", "hex", "srec", "esp"].includes(file.format)
+    || (["raw", "esp-unknown"].includes(file.format) && $("raw_language").value.trim()) ? "analyze" : "toolbox";
 }
 
 async function submit(mode) {
@@ -210,7 +211,8 @@ async function submit(mode) {
         failures.push(...results.filter((result) => result.status === "rejected").map((result) => result.reason.message));
       }
       if (mode === "compare" && uploaded.length === 2) {
-        await start(uploaded[0].id, "compare", {second: uploaded[1].id});
+        const [first, second] = pending.filter((item) => item.finished).map((item) => item.result.id);
+        await start(first, "compare", {second});
       }
     }
     message(failures.length ? failures.join(" · ") : mode === "upload"
@@ -259,7 +261,7 @@ function runRow(run) {
   const current = details.get(run.id);
   const running = current?.jobs.flatMap((job) => job.steps).find((step) => step.status === "in_progress");
   const failed = current?.jobs.flatMap((job) => job.steps).find((step) => step.conclusion === "failure");
-  const status = running || failed;
+  const status = run.status === "completed" ? failed : running;
   info.append(element("small", [modes[run.mode], "#" + run.id, time(run.run_started_at || run.created_at),
     statuses[run.conclusion || run.status] || run.status, status && (stepNames[status.name] || status.name)].filter(Boolean).join(" · ")));
   const actions = element("div", "", "controls");
@@ -287,7 +289,11 @@ function drawRuns() {
 }
 
 async function refresh(reportError = true) {
-  if (polling || !csrf) return;
+  if (!csrf) return;
+  if (polling) {
+    refreshQueued = true;
+    return;
+  }
   polling = true;
   try {
     state = await api("/api/uploads");
@@ -304,6 +310,10 @@ async function refresh(reportError = true) {
     if (reportError && !busy) message(error.message, true);
   } finally {
     polling = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      void refresh(false);
+    }
   }
 }
 

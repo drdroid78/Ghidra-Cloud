@@ -11,7 +11,8 @@ REPO = os.environ["GITHUB_REPOSITORY"]
 ROOT = Path(os.environ["GITHUB_WORKSPACE"])
 LIMIT = 100 * 1024 * 1024
 SUFFIX = {"elf": "elf", "pe": "exe", "macho": "macho", "hex": "hex", "srec": "srec",
-          "apk": "apk", "zip": "zip", "jar": "jar", "dex": "dex", "pcap": "pcap", "gz": "gz", "tar": "tar"}
+          "apk": "apk", "zip": "zip", "jar": "jar", "dex": "dex", "pcap": "pcap", "gz": "gz", "tar": "tar",
+          "esp": "esp"}
 
 
 def gh(*args):
