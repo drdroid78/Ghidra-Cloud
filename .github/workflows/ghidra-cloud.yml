@@ -2,7 +2,7 @@ name: Ghidra Cloud
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/ghidra-cloud.yml', 'scripts/**']
+    paths: ['.github/workflows/ghidra-cloud.yml', 'scripts/**', 'toolbox/**', '.github/workflows/toolbox.yml']
   workflow_dispatch:
     inputs:
       mode:

@@ -1,0 +1,88 @@
+name: Reverse Engineering Toolbox
+on:
+  push:
+    branches: [main]
+    paths: ['toolbox/**', '.github/workflows/toolbox.yml']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Test suite or public artifact analysis'
+        type: choice
+        options: [selftest, analyze]
+        default: analyze
+      binary_path:
+        description: 'Authorized PUBLIC repository file (up to 100 MiB)'
+        type: string
+      analyzers:
+        description: 'auto or comma-separated ghidra,jadx,apktool,binwalk,radare2,yara,capstone,tshark,lief'
+        type: string
+        default: auto
+      query:
+        description: 'Literal Ghidra search'
+        type: string
+      max_functions:
+        description: 'Ghidra decompilation attempts (1–5000)'
+        type: string
+        default: '200'
+      rules_path:
+        description: 'Optional PUBLIC YARA rule file'
+        type: string
+      raw_arch:
+        description: 'Capstone RAW architecture, e.g. x86_64, ARM, THUMB, MIPS32BE'
+        type: string
+      raw_language:
+        description: 'Ghidra RAW language ID'
+        type: string
+      raw_base:
+        description: 'RAW load address, hexadecimal'
+        type: string
+      raw_entry:
+        description: 'Ghidra RAW entry address, hexadecimal'
+        type: string
+      raw_compiler:
+        description: 'Ghidra RAW compiler spec'
+        type: string
+        default: default
+permissions:
+  contents: read
+jobs:
+  toolbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      MODE: ${{ inputs.mode || 'selftest' }}
+      INPUT_PATH: ${{ inputs.binary_path }}
+      ANALYZERS: ${{ inputs.analyzers || 'auto' }}
+      QUERY: ${{ inputs.query }}
+      LIMIT: ${{ inputs.max_functions || '200' }}
+      RULES_PATH: ${{ inputs.rules_path }}
+      RAW_ARCH: ${{ inputs.raw_arch }}
+      RAW_LANGUAGE: ${{ inputs.raw_language }}
+      RAW_BASE: ${{ inputs.raw_base }}
+      RAW_ENTRY: ${{ inputs.raw_entry }}
+      RAW_COMPILER: ${{ inputs.raw_compiler || 'default' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install verified Ghidra
+        run: bash scripts/install.sh
+      - name: Install eight analyzers
+        run: bash toolbox/install.sh
+      - name: Run analysis and assertions
+        run: python -u toolbox/analyze.py
+      - name: Save public evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolbox-report
+          path: ${{ runner.temp }}/toolbox/report/
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Save Ghidra projects
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolbox-ghidra-projects
+          path: ${{ runner.temp }}/toolbox/ghidra-projects.tar.gz
+          retention-days: 14
+          if-no-files-found: ignore
