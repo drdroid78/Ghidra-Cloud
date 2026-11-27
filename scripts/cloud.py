@@ -259,7 +259,7 @@ int main(void) { return cloud_caller(5); }
     assert "raw_entry" in (rr/"decompiled.txt").read_text()
     src=fixture/"arm.c"
     src.write_text("volatile int x=5; __attribute__((noinline)) int probe(int v){return v*3+7;} int entry(void){return probe(x);}")
-    for target,label,arch in [("armv7-none-eabi","arm32","ARM"),("aarch64-linux-gnu","arm64","AARCH64"),("mipsel-none-elf","mips32","MIPS"),("i386-linux-gnu","x86_32","x86")]:
+    for target,label,arch in [("armv7-none-eabi","arm32","ARM"),("aarch64-linux-gnu","arm64","AARCH64"),("mipsel-none-elf","mips32","MIPS"),("i386-linux-gnu","x86_32","X86")]:
         elf=fixture/f"{label}.elf"
         cmd("clang",f"--target={target}","-fuse-ld=lld","-nostdlib","-static","-fno-stack-protector","-O1","-Wl,-e,entry","-Wl,--strip-all","-o",elf,src)
         r=analyze(elf,label,"*","",200)
@@ -302,6 +302,8 @@ int main(void) { return cloud_caller(5); }
     license_path=REPORT/"OpenSBI-COPYING.BSD"
     cmd("curl","-fLsS","--max-time","60","-o",license_path,"https://raw.githubusercontent.com/riscv-software-src/opensbi/v1.6/COPYING.BSD")
     (REPORT/"OpenSBI-source.txt").write_text("Source: https://github.com/riscv-software-src/opensbi/tree/v1.6\nRelease: "+url+"\nArchive SHA256 (observed): "+sha(archive)+"\nMember: "+chosen.name+"\nFirmware SHA256: "+sha(fw)+"\n")
+    shutil.copyfile(license_path,PROJECT/"OpenSBI-COPYING.BSD")
+    shutil.copyfile(REPORT/"OpenSBI-source.txt",PROJECT/"OpenSBI-source.txt")
     fr=analyze(fw,"opensbi","*","sbi_",200)
     assert "RISCV" in info(fr)["LANGUAGE"].upper() and int(info(fr)["FUNCTIONS"])>=50 and int(info(fr)["DECOMPILED"])>0,info(fr)
     print("REAL_FIRMWARE_OK",info(fr),flush=True)

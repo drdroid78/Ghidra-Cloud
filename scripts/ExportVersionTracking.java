@@ -11,6 +11,8 @@ public class ExportVersionTracking extends GhidraScript {
         if(a.length!=2)throw new IllegalArgumentException("session name and output directory");
         DomainFile df=state.getProject().getProjectData().getRootFolder().getFile(a[0]);
         if(df==null)throw new IllegalStateException("VT session missing");
+        // Version Tracking synchronizes the destination program, so close the script transaction first.
+        end(true);
         VTSession s=(VTSession)df.getDomainObject(this,true,false,monitor);
         int count=0, functionCount=0, accepted=0;
         try(PrintWriter out=new PrintWriter(Files.newBufferedWriter(Paths.get(a[1],"version-tracking.tsv")))){
