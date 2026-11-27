@@ -40,10 +40,13 @@ def read_tsv(p):
     with p.open(encoding="utf-8") as f:
         return list(csv.DictReader(f, delimiter="\t"))
 
-def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False):
+def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False, pair=False):
     out = REPORT / (label + "-resumed" if resume else label)
     out.mkdir(parents=True, exist_ok=True)
-    project = PROJECT / label
+    project = PROJECT / ("a" if pair else label)
+    if resume:
+        metadata=json.loads((PROJECT/label/"input.json").read_text())
+        project=PROJECT/metadata.get("project_label",label)
     project.mkdir(parents=True, exist_ok=True)
     if not 1 <= limit <= 5000:
         raise ValueError("max_functions must be 1..5000")
@@ -53,7 +56,7 @@ def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False):
         args += ["-process", path, "-noanalysis"]
     else:
         # Avoid ambiguous or option-like names in the Ghidra project.
-        name = "target" + (path.suffix if re.fullmatch(r"\.[A-Za-z0-9]{1,12}", path.suffix) else ".bin")
+        name = ("target_" + label if pair else "target") + (path.suffix if re.fullmatch(r"\.[A-Za-z0-9]{1,12}", path.suffix) else ".bin")
         staged = WORK / "inputs" / label / name
         staged.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, staged)
@@ -86,13 +89,16 @@ def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False):
             (out / "raw-import.json").write_text(json.dumps({"language":language,"load_address_hex":base,"entry_address_hex":entry,"compiler":compiler},indent=2))
             args += ["-loader", "BinaryLoader", "-loader-baseAddr", "0x"+base.removeprefix("0x"),
                      "-processor", language, "-cspec", compiler, "-preScript", "SeedRaw.java", entry.removeprefix("0x")]
-        (project / "input.json").write_text(json.dumps({"name": name, "sha256": sha(staged)}))
+        metadata_dir=PROJECT/label; metadata_dir.mkdir(exist_ok=True)
+        (metadata_dir / "input.json").write_text(json.dumps({"name": name, "sha256": sha(staged), "project_label": project.name}))
+        if os.getenv("POINTER_DISCOVERY","true")=="true" and not raw:
+            args += ["-postScript","DiscoverPointerTables.java",out/"pointer-tables.tsv"]
     args += ["-postScript", "CloudReport.java", out, "f:"+filt, "q:"+query, str(limit)]
     # Ghidra can exit zero despite script errors, so require explicit output and success marker.
     with (out / "headless-console.log").open("w") as f:
         cmd(*args, stdout=f, stderr=subprocess.STDOUT)
     console = (out / "headless-console.log").read_text(errors="replace")
-    if "CLOUD_REPORT_OK" not in console or (raw and "RAW_ENTRY_OK" not in console):
+    if "CLOUD_REPORT_OK" not in console or (raw and "RAW_ENTRY_OK" not in console) or (not resume and not raw and os.getenv("POINTER_DISCOVERY","true")=="true" and "POINTER_TABLES_OK" not in console):
         print(console[-12000:], flush=True)
         raise RuntimeError("Ghidra script did not complete")
     if info(out).get("CANCELLED") != "false":
@@ -100,6 +106,8 @@ def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False):
     if not (project / "CloudAnalysis.gpr").exists() or not (project / "CloudAnalysis.rep").is_dir():
         raise RuntimeError("Persistent Ghidra project not found")
     print(label, info(out), flush=True)
+    for line in console.splitlines():
+        if "POINTER_TABLES_OK" in line: print(line,flush=True)
     return out
 
 def compare(a, b, report_a, report_b):
@@ -166,6 +174,27 @@ def compare(a, b, report_a, report_b):
     (dest/"summary.json").write_text(json.dumps(result,indent=2))
     print("COMPARISON",result,flush=True)
 
+def version_tracking():
+    dest=REPORT/"comparison"
+    dest.mkdir(exist_ok=True)
+    a=json.loads((PROJECT/"a"/"input.json").read_text())["name"]
+    b=json.loads((PROJECT/"b"/"input.json").read_text())["name"]
+    project=PROJECT/"a"
+    args=[HEADLESS,project,"CloudAnalysis","-process",b,"-noanalysis","-max-cpu","4",
+          "-scriptPath",SCRIPTS,"-postScript","AutoVersionTrackingScript.java","/","CloudVT","/"+a]
+    with (dest/"version-tracking-run.log").open("w") as f:
+        cmd(*args,stdout=f,stderr=subprocess.STDOUT)
+    args=[HEADLESS,project,"CloudAnalysis","-process",b,"-noanalysis","-max-cpu","4",
+          "-scriptPath",SCRIPTS,"-postScript","ExportVersionTracking.java","CloudVT",dest]
+    with (dest/"version-tracking-export.log").open("w") as f:
+        cmd(*args,stdout=f,stderr=subprocess.STDOUT)
+    output=(dest/"version-tracking-export.log").read_text(errors="replace")
+    if "VERSION_TRACKING_OK" not in output:
+        print((dest/"version-tracking-run.log").read_text(errors="replace")[-12000:],flush=True)
+        print(output[-12000:],flush=True)
+        raise RuntimeError("Native Version Tracking export failed")
+    print((dest/"version-tracking-summary.txt").read_text(),flush=True)
+
 def package():
     target=WORK/"ghidra-project.tar.gz"
     with tarfile.open(target,"w:gz") as t:
@@ -206,8 +235,8 @@ int main(void) { return cloud_caller(5); }
         src=fixture/f"{name}.c"; src.write_text(template.replace("MAGIC",magic))
         cmd("gcc","-O0","-g","-fno-pie","-no-pie","-o",fixture/f"{name}.elf",src)
     a,b=fixture/"a.elf",fixture/"b.elf"
-    ra=analyze(a,"a","*","cloud_marker",200)
-    rb=analyze(b,"b","*","cloud_probe",200)
+    ra=analyze(a,"a","*","cloud_marker",200,pair=True)
+    rb=analyze(b,"b","*","cloud_probe",200,pair=True)
     s=info(ra)
     assert int(s["DECOMPILED"])>0 and int(s["XREFS"])>0 and int(s["CALLS"])>0 and int(s["CONSTANTS"])>0
     assert "CLOUD_MARKER_TEST_123" in (ra/"strings.tsv").read_text()
@@ -220,6 +249,9 @@ int main(void) { return cloud_caller(5); }
     diff=read_tsv(REPORT/"comparison/functions-diff.tsv")
     assert any(x["a_name"]=="cloud_probe" and x["status"]=="changed_instruction_bytes" for x in diff)
     assert any(x["a_name"]=="cloud_caller" and x["status"]=="same_instruction_bytes" for x in diff)
+    version_tracking()
+    vt=read_tsv(REPORT/"comparison/version-tracking.tsv")
+    assert any(x["source_name"]=="cloud_caller" and x["destination_name"]=="cloud_caller" for x in vt),vt[:20]
     raw=fixture/"raw.bin"; raw.write_bytes(bytes.fromhex("b878563412c3"))
     rr=analyze(raw,"raw","*","0x12345678",50,raw=("x86:LE:64:default","1000","1000","gcc"))
     assert any(int(x["entry"],16)==0x1000 and x["name"]=="raw_entry" for x in read_tsv(rr/"functions.tsv"))
@@ -227,7 +259,7 @@ int main(void) { return cloud_caller(5); }
     assert "raw_entry" in (rr/"decompiled.txt").read_text()
     src=fixture/"arm.c"
     src.write_text("volatile int x=5; __attribute__((noinline)) int probe(int v){return v*3+7;} int entry(void){return probe(x);}")
-    for target,label,arch in [("armv7-none-eabi","arm32","ARM"),("aarch64-linux-gnu","arm64","AARCH64")]:
+    for target,label,arch in [("armv7-none-eabi","arm32","ARM"),("aarch64-linux-gnu","arm64","AARCH64"),("mipsel-none-elf","mips32","MIPS"),("i386-linux-gnu","x86_32","x86")]:
         elf=fixture/f"{label}.elf"
         cmd("clang",f"--target={target}","-fuse-ld=lld","-nostdlib","-static","-fno-stack-protector","-O1","-Wl,-e,entry","-Wl,--strip-all","-o",elf,src)
         r=analyze(elf,label,"*","",200)
@@ -242,7 +274,8 @@ int main(void) { return cloud_caller(5); }
     cmd("gcc","-O2","-s","-fno-pie","-no-pie","-o",elf,src)
     indirect=analyze(elf,"indirect","*","",500)
     print("INDIRECT_FIXTURE_COVERAGE expected_functions_at_least=256 detected="+info(indirect)["FUNCTIONS"],flush=True)
-    assert int(info(indirect)["DECOMPILED"])>0
+    assert int(info(indirect)["FUNCTIONS"])>=256 and int(info(indirect)["DECOMPILED"])>=250,info(indirect)
+    assert sum(x["status"]=="recovered" for x in read_tsv(indirect/"pointer-tables.tsv"))>=250
     # Test large-scale enumeration separately, with direct references to every function.
     direct="\n".join(f"__attribute__((noinline)) int f{i}(int x){{return x+{i+1000};}}" for i in range(256))
     direct+="\nint main(int argc,char**argv){int x=argc;"+"".join(f"x=f{i}(x);" for i in range(256))+"return x;}"
@@ -250,6 +283,28 @@ int main(void) { return cloud_caller(5); }
     cmd("gcc","-O2","-s","-fno-pie","-no-pie","-o",elf,src)
     lr=analyze(elf,"large","*","",500)
     assert int(info(lr)["FUNCTIONS"])>=256 and int(info(lr)["DECOMPILED"])>=250,info(lr)
+    # Official open-source OpenSBI release: a real RISC-V firmware, not a synthetic fixture.
+    url="https://github.com/riscv-software-src/opensbi/releases/download/v1.6/opensbi-1.6-rv-bin.tar.xz"
+    archive=fixture/"opensbi.tar.xz"
+    cmd("curl","-fLsS","--retry","2","--max-time","120","--max-filesize","50000000","-o",archive,url)
+    assert archive.stat().st_size==24782156
+    fw=fixture/"opensbi.elf"
+    with tarfile.open(archive,"r:xz") as t:
+        candidates=[m for m in t.getmembers() if m.isfile() and m.name.endswith("/generic/firmware/fw_dynamic.elf") and ("/lp64/" in m.name or "/rv64/" in m.name)]
+        if not candidates:
+            candidates=[m for m in t.getmembers() if m.isfile() and m.name.endswith("/fw_dynamic.elf") and ("lp64" in m.name or "rv64" in m.name)]
+        if not candidates:
+            print("OPENSBI_ELF_MEMBERS",[m.name for m in t.getmembers() if m.name.endswith(".elf")][:80],flush=True)
+            raise RuntimeError("Official firmware ELF not found")
+        chosen=sorted(candidates,key=lambda m:m.name)[0]
+        assert 0<chosen.size<=LIMIT_BYTES
+        with t.extractfile(chosen) as source,fw.open("wb") as dest: shutil.copyfileobj(source,dest)
+    license_path=REPORT/"OpenSBI-COPYING.BSD"
+    cmd("curl","-fLsS","--max-time","60","-o",license_path,"https://raw.githubusercontent.com/riscv-software-src/opensbi/v1.6/COPYING.BSD")
+    (REPORT/"OpenSBI-source.txt").write_text("Source: https://github.com/riscv-software-src/opensbi/tree/v1.6\nRelease: "+url+"\nArchive SHA256 (observed): "+sha(archive)+"\nMember: "+chosen.name+"\nFirmware SHA256: "+sha(fw)+"\n")
+    fr=analyze(fw,"opensbi","*","sbi_",200)
+    assert "RISCV" in info(fr)["LANGUAGE"].upper() and int(info(fr)["FUNCTIONS"])>=50 and int(info(fr)["DECOMPILED"])>0,info(fr)
+    print("REAL_FIRMWARE_OK",info(fr),flush=True)
     # Reopen an already saved project, search a known constant and compare the prior fingerprint.
     first=PROJECT/"a"/"input.json"
     name=json.loads(first.read_text())["name"]
@@ -280,11 +335,12 @@ def main():
         a=input_path(os.environ["INPUT_PATH"])
         language=os.getenv("RAW_LANGUAGE","")
         raw=(language,os.environ["RAW_BASE"],os.environ["RAW_ENTRY"],os.getenv("RAW_COMPILER","default")) if language else None
-        ra=analyze(a,"a",filt,query,limit,raw)
+        ra=analyze(a,"a",filt,query,limit,raw,pair=mode=="compare")
         if mode=="compare":
             b=input_path(os.environ["COMPARE_PATH"])
-            rb=analyze(b,"b",filt,query,limit,raw)
+            rb=analyze(b,"b",filt,query,limit,raw,pair=True)
             compare(a,b,ra,rb)
+            version_tracking()
     else: raise ValueError("Unknown mode")
     package()
 
