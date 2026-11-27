@@ -26,6 +26,7 @@ let state = {uploads: [], runs: []};
 let busy = false;
 let polling = false;
 let inspected = null;
+let nextPollUntil = 0;
 const selected = new Set();
 const details = new Map();
 const uuid = () => crypto.randomUUID().replaceAll("-", "");
@@ -68,6 +69,7 @@ async function api(path, method = "GET", body = null, asText = false) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || "Ошибка HTTP " + response.status);
   }
+  if (method === "POST" && path.startsWith("/api/runs")) nextPollUntil = Date.now() + 45000;
   return asText ? response.text() : response.json();
 }
 
@@ -405,4 +407,6 @@ for (const mode of ["upload", "analyze", "compare"]) {
 $("close-results").onclick = () => $("results").close();
 $("results").onclose = () => { inspected = null; };
 api("/api/session").then((data) => { access(data.csrf); return refresh(); }).catch(() => {});
-setInterval(() => { if (!document.hidden) void refresh(); }, 12000);
+setInterval(() => {
+  if (!document.hidden && (busy || Date.now() < nextPollUntil || state.runs.some((run) => run.status !== "completed"))) void refresh();
+}, 12000);

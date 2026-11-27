@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from flask import Flask, Response, abort, jsonify, render_template, request, session, stream_with_context
 from werkzeug.exceptions import HTTPException
+from web.github_lease import CredentialLease
 
 MIB = 1024 * 1024
 MAX_INPUT = 100 * MIB
@@ -221,7 +222,7 @@ class GitHub:
         return run
 
     def binary(self, path):
-        return self.get(path, headers={"Accept": "application/octet-stream"}, stream=True)
+        return self.get(path, stream=True)
 
 
 def options_from(data):
@@ -248,20 +249,32 @@ def create_app(overrides=None):
     app = Flask(__name__)
     app.config.update(MAX_CONTENT_LENGTH=MAX_INPUT + 128 * 1024, MAX_FORM_PARTS=8,
                       SESSION_COOKIE_SECURE=True, SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict")
-    app.config.update({key: os.environ.get(key) for key in ("APP_PASSWORD", "SESSION_SECRET", "GITHUB_TOKEN", "GITHUB_REPO")})
+    app.config.update({key: os.environ.get(key) for key in (
+        "APP_PASSWORD", "SESSION_SECRET", "GITHUB_TOKEN", "GITHUB_REPO",
+        "WEB_BROKER_SECRET", "GITHUB_SSH_PRIVATE_KEY", "GITHUB_SSH_KNOWN_HOST")})
     app.config.update(overrides or {})
     app.secret_key = app.config["SESSION_SECRET"]
     login_lock = threading.Lock()
     failures = []
     upload_slots = threading.BoundedSemaphore(3)
     job_lock = threading.Lock()
+    broker = None
+    if all(app.config.get(key) for key in ("GITHUB_REPO", "WEB_BROKER_SECRET", "GITHUB_SSH_PRIVATE_KEY", "GITHUB_SSH_KNOWN_HOST")):
+        broker = CredentialLease(app.config["GITHUB_REPO"], app.config["GITHUB_SSH_PRIVATE_KEY"],
+                                 app.config["GITHUB_SSH_KNOWN_HOST"])
 
     def github():
-        return GitHub(app.config["GITHUB_REPO"], app.config["GITHUB_TOKEN"])
+        token = app.config["GITHUB_TOKEN"]
+        if not token and broker:
+            try:
+                token = broker.get()
+            except RuntimeError as err:
+                raise GitHubError(503, str(err)) from err
+        return GitHub(app.config["GITHUB_REPO"], token)
 
     @app.before_request
     def access():
-        if request.endpoint in {"health", "index", "login", "static"}:
+        if request.endpoint in {"health", "index", "login", "static", "receive_lease"}:
             return
         if not session.get("csrf"):
             abort(401)
@@ -296,6 +309,20 @@ def create_app(overrides=None):
     @app.get("/healthz")
     def health():
         return jsonify(status="ok")
+
+    @app.post("/internal/github-lease")
+    def receive_lease():
+        supplied = request.headers.get("X-Broker-Secret", "")
+        if not broker or not hmac.compare_digest(supplied.encode(), app.config["WEB_BROKER_SECRET"].encode()):
+            abort(404)
+        if request.content_length is None or request.content_length > 12000:
+            abort(400)
+        data = request.get_json()
+        if not isinstance(data, dict) or not isinstance(data.get("nonce"), str):
+            abort(400)
+        nonce = data["nonce"]
+        acknowledged = broker.submit(nonce, data["token"]) if "token" in data else broker.running(nonce)
+        return ("", 204 if acknowledged else 409)
 
     @app.get("/")
     def index():

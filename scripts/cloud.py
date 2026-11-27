@@ -352,15 +352,16 @@ def main():
     elif mode in ("analyze","compare"):
         a=input_path(os.environ["INPUT_PATH"])
         language=os.getenv("RAW_LANGUAGE","")
+        web_input=bool(os.getenv("UPLOAD_ID"))
         raw=(language,os.environ["RAW_BASE"],os.environ["RAW_ENTRY"],os.getenv("RAW_COMPILER","default")) if language else None
-        ra=analyze(a,"a",filt,query,limit,raw,pair=mode=="compare")
+        raw_a=None if web_input and a.suffix.lower() != ".bin" else raw
+        ra=analyze(a,"a",filt,query,limit,raw_a,pair=mode=="compare")
         if mode=="compare":
             b=input_path(os.environ["COMPARE_PATH"])
-            web_compare=bool(os.getenv("UPLOAD_ID"))
-            raw_b=None if web_compare and b.suffix.lower() not in {".bin", ".img", ".rom", ".fw", ".dat"} else raw
+            raw_b=None if web_input and b.suffix.lower() != ".bin" else raw
             rb=analyze(b,"b",filt,query,limit,raw_b,pair=True)
             compare(a,b,ra,rb)
-            if not web_compare or info(ra)["LANGUAGE"] == info(rb)["LANGUAGE"]:
+            if not web_input or info(ra)["LANGUAGE"] == info(rb)["LANGUAGE"]:
                 version_tracking()
             else:
                 (REPORT/"comparison"/"version-tracking-summary.txt").write_text(
