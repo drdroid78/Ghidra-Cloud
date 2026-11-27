@@ -41,7 +41,7 @@ def read_tsv(p):
         return list(csv.DictReader(f, delimiter="\t"))
 
 def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False):
-    out = REPORT / label
+    out = REPORT / (label + "-resumed" if resume else label)
     out.mkdir(parents=True, exist_ok=True)
     project = PROJECT / label
     project.mkdir(parents=True, exist_ok=True)
@@ -251,6 +251,7 @@ def main():
         label=os.getenv("RESUME_LABEL","a") or "a"
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}",label): raise ValueError("Invalid project label")
         name=json.loads((PROJECT/label/"input.json").read_text())["name"]
+        os.environ.pop("GH_TOKEN",None)
         analyze(name,label,filt,query,limit,resume=True)
     elif mode in ("analyze","compare"):
         a=input_path(os.environ["INPUT_PATH"])
