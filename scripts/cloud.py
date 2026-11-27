@@ -83,6 +83,7 @@ def analyze(path, label, filt="*", query="", limit=200, raw=None, resume=False):
                     raise ValueError("raw addresses must be hexadecimal")
             if not re.fullmatch(r"[A-Za-z0-9:_-]+", language) or not re.fullmatch(r"[A-Za-z0-9_-]+", compiler):
                 raise ValueError("Invalid language/compiler ID")
+            (out / "raw-import.json").write_text(json.dumps({"language":language,"load_address_hex":base,"entry_address_hex":entry,"compiler":compiler},indent=2))
             args += ["-loader", "BinaryLoader", "-loader-baseAddr", "0x"+base.removeprefix("0x"),
                      "-processor", language, "-cspec", compiler, "-preScript", "SeedRaw.java", entry.removeprefix("0x")]
         (project / "input.json").write_text(json.dumps({"name": name, "sha256": sha(staged)}))
@@ -221,7 +222,7 @@ int main(void) { return cloud_caller(5); }
     assert any(x["a_name"]=="cloud_caller" and x["status"]=="same_instruction_bytes" for x in diff)
     raw=fixture/"raw.bin"; raw.write_bytes(bytes.fromhex("b878563412c3"))
     rr=analyze(raw,"raw","*","0x12345678",50,raw=("x86:LE:64:default","1000","1000","gcc"))
-    assert info(rr)["IMAGE_BASE"].lstrip("0")=="1000"
+    assert any(int(x["entry"],16)==0x1000 and x["name"]=="raw_entry" for x in read_tsv(rr/"functions.tsv"))
     assert any(x["kind"]=="constant" for x in read_tsv(rr/"matches.tsv"))
     assert "raw_entry" in (rr/"decompiled.txt").read_text()
     src=fixture/"arm.c"
@@ -232,12 +233,21 @@ int main(void) { return cloud_caller(5); }
         r=analyze(elf,label,"*","",200)
         s=info(r)
         assert s["LANGUAGE"].upper().startswith(arch+":") and int(s["DECOMPILED"])>0,s
+    # Larger stripped ELF: 256 noinline functions and a dispatch table.
+    src=fixture/"large.c"
+    funcs="\n".join(f"__attribute__((noinline)) int f{i}(int x){{return x+{i+1000};}}" for i in range(256))
+    table=",".join(f"f{i}" for i in range(256))
+    src.write_text(funcs+"\nint (*volatile table[256])(int)={"+table+"};\nint main(int argc,char**argv){return table[argc&255](argc);}")
+    elf=fixture/"large.elf"
+    cmd("gcc","-O2","-s","-fno-pie","-no-pie","-o",elf,src)
+    lr=analyze(elf,"large","*","",500)
+    assert int(info(lr)["FUNCTIONS"])>=256 and int(info(lr)["DECOMPILED"])>=250,info(lr)
     # Reopen an already saved project, search a known constant and compare the prior fingerprint.
     first=PROJECT/"a"/"input.json"
     name=json.loads(first.read_text())["name"]
     restored=analyze(name,"a","*","0x12345678",200,resume=True)
     assert any(x["kind"]=="constant" for x in read_tsv(restored/"matches.tsv"))
-    print("SELF_TEST_PASSED: code, strings, scalars, xrefs, calls, comparison, raw, ARM32, ARM64, reopen",flush=True)
+    print("SELF_TEST_PASSED: code, strings, scalars, xrefs, calls, comparison, raw, ARM32, ARM64, larger stripped ELF, reopen",flush=True)
 
 def main():
     WORK.mkdir(exist_ok=True); REPORT.mkdir(exist_ok=True); PROJECT.mkdir(exist_ok=True)
