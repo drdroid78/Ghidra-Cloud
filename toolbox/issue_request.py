@@ -25,7 +25,8 @@ for k,v in data.items():
     if k=="max_functions" and (not v.isdecimal() or not 1<=int(v)<=5000):raise SystemExit("Invalid limit")
     if k=="resume_run" and not re.fullmatch(r"[1-9][0-9]{0,19}",v):raise SystemExit("Invalid run ID")
 with open(os.environ["GITHUB_ENV"],"a") as f:
-    for k,v in data.items():f.write(mapping[k]+"="+v+"\n")
+    for k,v in data.items():
+        if k!="source_ref":f.write(mapping[k]+"="+v+"\n")
 with open(os.environ["GITHUB_OUTPUT"],"a") as f:
     f.write("mode="+mode+"\n")
     if "source_ref" in data:f.write("source_ref="+data["source_ref"]+"\n")
