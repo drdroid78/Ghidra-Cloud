@@ -1,0 +1,161 @@
+name: Ghidra Cloud
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ghidra-cloud.yml']
+  workflow_dispatch:
+    inputs:
+      binary_path:
+        description: 'Path to a PUBLIC, authorized binary in this repository; empty = self-test'
+        required: false
+        type: string
+        default: ''
+      function_filter:
+        description: 'Function name or address substring; * = all'
+        required: false
+        type: string
+        default: '*'
+      max_functions:
+        description: 'Maximum functions to decompile (1-200)'
+        required: false
+        type: string
+        default: '50'
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.binary_path != '' && 45 || 10 }}
+    env:
+      INPUT_PATH: ${{ inputs.binary_path }}
+      FILTER: ${{ inputs.function_filter || '*' }}
+      LIMIT: ${{ inputs.max_functions || '50' }}
+      GHIDRA_URL: https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.2_build/ghidra_12.2_PUBLIC_20261016.zip
+      GHIDRA_SHA: 2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67
+    steps:
+      - name: Checkout authorized input
+        if: inputs.binary_path != ''
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install verified Ghidra and prepare analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ghidra-cloud"/{scripts,project,report}
+          cd "$RUNNER_TEMP/ghidra-cloud"
+          echo "CPU: $(nproc)"
+          free -h
+          df -h .
+          if [ -n "${JAVA_HOME_25_X64:-}" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
+          java -version
+          java -version 2>&1 | grep -Eq 'version "25([."]|$)' || { echo 'JDK 25 required'; exit 1; }
+          if [ -n "${JAVA_HOME:-}" ]; then
+            echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+            echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          fi
+          curl -fLsS --connect-timeout 15 --max-time 180 --max-filesize 800000000 -o ghidra.zip "$GHIDRA_URL"
+          printf '%s  ghidra.zip\n' "$GHIDRA_SHA" | sha256sum -c -
+          unzip -q ghidra.zip
+          rm ghidra.zip
+          test -x ghidra_12.2_PUBLIC/support/analyzeHeadless
+          echo 'Ghidra 12.2 archive verified'
+          cat > scripts/ExportCloudReport.java <<'JAVA'
+          import ghidra.app.script.GhidraScript;
+          import ghidra.app.decompiler.DecompInterface;
+          import ghidra.app.decompiler.DecompileResults;
+          import ghidra.program.model.listing.Function;
+          import ghidra.program.model.listing.FunctionIterator;
+          import java.io.PrintWriter;
+          import java.nio.charset.StandardCharsets;
+          import java.nio.file.Files;
+          import java.nio.file.Paths;
+          import java.util.Locale;
+          public class ExportCloudReport extends GhidraScript {
+              @Override public void run() throws Exception {
+                  String[] args = getScriptArgs();
+                  if (args.length != 3) throw new IllegalArgumentException("Expected report, filter, limit");
+                  String filter = args[1].toLowerCase(Locale.ROOT);
+                  int limit = Integer.parseInt(args[2]);
+                  int selected = 0, completed = 0, failed = 0, total = 0;
+                  DecompInterface di = new DecompInterface();
+                  try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(Paths.get(args[0]), StandardCharsets.UTF_8))) {
+                      out.println("Program: " + currentProgram.getName());
+                      out.println("Language: " + currentProgram.getLanguageID());
+                      out.println("Image base: " + currentProgram.getImageBase());
+                      out.println("Filter: " + filter + ", limit: " + limit);
+                      if (!di.openProgram(currentProgram)) throw new IllegalStateException("Decompiler open failed");
+                      FunctionIterator it = currentProgram.getFunctionManager().getFunctions(true);
+                      while (it.hasNext() && !monitor.isCancelled()) {
+                          Function f = it.next();
+                          total++;
+                          String entry = f.getEntryPoint().toString();
+                          String name = f.getName();
+                          if (selected >= limit || (!filter.equals("*") && !name.toLowerCase(Locale.ROOT).contains(filter) && !entry.toLowerCase(Locale.ROOT).contains(filter))) continue;
+                          selected++;
+                          out.println("\nFUNCTION " + entry + " " + name);
+                          DecompileResults dr = di.decompileFunction(f, 20, monitor);
+                          if (dr.decompileCompleted() && dr.getDecompiledFunction() != null) {
+                              out.println(dr.getDecompiledFunction().getC());
+                              completed++;
+                          } else {
+                              out.println("DECOMPILATION_FAILED: " + dr.getErrorMessage());
+                              failed++;
+                          }
+                      }
+                      out.println("\nTOTAL_FUNCTIONS=" + total);
+                      out.println("SELECTED=" + selected);
+                      out.println("DECOMPILED=" + completed);
+                      out.println("FAILED=" + failed);
+                      if (out.checkError()) throw new java.io.IOException("Report write failed");
+                  } finally { di.dispose(); }
+                  println("Cloud report: selected=" + selected + ", decompiled=" + completed + ", failed=" + failed);
+                  if (completed == 0) throw new IllegalStateException("No successful decompilation");
+              }
+          }
+          JAVA
+      - name: Analyze without executing the input
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/ghidra-cloud"
+          [[ "$LIMIT" =~ ^[0-9]{1,3}$ ]] && (( 10#$LIMIT >= 1 && 10#$LIMIT <= 200 )) || { echo 'Invalid max_functions'; exit 1; }
+          if [[ -z "$INPUT_PATH" ]]; then
+            cat > probe.c <<'C'
+          __attribute__((noinline)) int cloud_probe(int x) { return x * 3 + 7; }
+          int main(void) { return cloud_probe(5) == 22 ? 0 : 1; }
+          C
+            gcc -O0 -g -o probe.elf probe.c
+            input="$PWD/probe.elf"
+            filter=cloud_probe
+          else
+            input="$(realpath -e -- "$GITHUB_WORKSPACE/$INPUT_PATH")"
+            case "$input" in "$GITHUB_WORKSPACE"/*) ;; *) echo 'Input outside repository'; exit 1;; esac
+            test -f "$input"
+            test "$(stat -c %s "$input")" -le 104857600
+            filter="$FILTER"
+          fi
+          sha256sum "$input" > report/input.sha256
+          file "$input" > report/input-format.txt
+          ghidra_12.2_PUBLIC/support/analyzeHeadless "$PWD/project" CloudAnalysis -import "$input" -analysisTimeoutPerFile 600 -max-cpu 2 -scriptPath "$PWD/scripts" -postScript ExportCloudReport.java "$PWD/report/decompiled.txt" "$filter" "$LIMIT" -log "$PWD/report/analysis.log" -deleteProject
+          test -s report/decompiled.txt
+          grep -Eq '^DECOMPILED=[1-9][0-9]*$' report/decompiled.txt
+          if [[ -z "$INPUT_PATH" ]]; then
+            grep -Eq '^FUNCTION [^ ]+ cloud_probe$' report/decompiled.txt
+            grep -Fq 'return x * 3 + 7;' report/decompiled.txt
+            cat report/decompiled.txt
+            echo 'SELF_TEST_PASSED'
+          else
+            grep -E '^(TOTAL_FUNCTIONS|SELECTED|DECOMPILED|FAILED)=' report/decompiled.txt
+          fi
+      - name: Save public analysis report
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ghidra-report
+          path: ${{ runner.temp }}/ghidra-cloud/report/
+          retention-days: 3
+          if-no-files-found: error
