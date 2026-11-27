@@ -264,7 +264,20 @@ int main(void) { return cloud_caller(5); }
         obj=fixture/f"{label}.o"
         extra=["-mno-abicalls","-fno-pic","-G0"] if label=="mips32" else []
         cmd("clang",f"--target={target}","-ffreestanding","-fno-stack-protector","-O1",*extra,"-c","-o",obj,src)
-        cmd("ld.lld","-e","entry","--strip-all","-static","-o",elf,obj)
+        if label=="mips32":
+            # Ubuntu may ship lld only in the versioned LLVM directory.
+            reported=subprocess.check_output(["clang","-print-prog-name=ld.lld"],text=True).strip()
+            candidates=[reported,shutil.which("ld.lld"),*(shutil.which(f"ld.lld-{n}") for n in range(25,13,-1)),*map(str,Path("/usr/lib").glob("llvm-*/bin/ld.lld"))]
+            linker=next((x for x in candidates if x and Path(x).is_file() and os.access(x,os.X_OK)),None)
+            if linker is None:
+                cmd("sudo","apt-get","update","-qq")
+                cmd("sudo","apt-get","install","-y","--no-install-recommends","lld")
+                linker=shutil.which("ld.lld")
+            if linker is None: raise RuntimeError("LLVM lld unavailable")
+            print("MIPS_LINKER",linker,flush=True)
+            cmd(linker,"-m","elf32ltsmip","-e","entry","--strip-all","-static","-o",elf,obj)
+        else:
+            cmd("clang",f"--target={target}","-fuse-ld=lld","-nostdlib","-static","-Wl,-e,entry","-Wl,--strip-all","-o",elf,obj)
         r=analyze(elf,label,"*","",200)
         s=info(r)
         assert s["LANGUAGE"].upper().startswith(arch+":") and int(s["DECOMPILED"])>0,s
