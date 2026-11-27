@@ -240,6 +240,14 @@ int main(void) { return cloud_caller(5); }
     src.write_text(funcs+"\nint (*volatile table[256])(int)={"+table+"};\nint main(int argc,char**argv){return table[argc&255](argc);}")
     elf=fixture/"large.elf"
     cmd("gcc","-O2","-s","-fno-pie","-no-pie","-o",elf,src)
+    indirect=analyze(elf,"indirect","*","",500)
+    print("INDIRECT_FIXTURE_COVERAGE expected_functions_at_least=256 detected="+info(indirect)["FUNCTIONS"],flush=True)
+    assert int(info(indirect)["DECOMPILED"])>0
+    # Test large-scale enumeration separately, with direct references to every function.
+    direct="\n".join(f"__attribute__((noinline)) int f{i}(int x){{return x+{i+1000};}}" for i in range(256))
+    direct+="\nint main(int argc,char**argv){int x=argc;"+"".join(f"x=f{i}(x);" for i in range(256))+"return x;}"
+    src.write_text(direct)
+    cmd("gcc","-O2","-s","-fno-pie","-no-pie","-o",elf,src)
     lr=analyze(elf,"large","*","",500)
     assert int(info(lr)["FUNCTIONS"])>=256 and int(info(lr)["DECOMPILED"])>=250,info(lr)
     # Reopen an already saved project, search a known constant and compare the prior fingerprint.
