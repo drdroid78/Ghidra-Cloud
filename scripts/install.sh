@@ -4,8 +4,10 @@ set -euo pipefail
 # Destructive installation is blocked unless the repository owner explicitly
 # approves it through workflow_dispatch. Ordinary workflow/issue runs cannot
 # provide this approval.
-if [[ "${GHIDRA_INSTALL_APPROVAL:-}" != "PAVEL_CONFIRMED_GHIDRA_12_2_INSTALL" ]]; then
-  echo "::error::Ghidra installation/reinstallation is blocked. Only drdroid78 may approve it via workflow_dispatch."
+if [[ "${GHIDRA_APPROVAL_EVENT:-}" != "workflow_dispatch" ||
+      "${GHIDRA_APPROVED_BY_ID:-}" != "62127032" ||
+      "${GHIDRA_INSTALL_APPROVAL:-}" != "PAVEL_CONFIRMED_GHIDRA_12_2_INSTALL" ]]; then
+  echo "::error::Ghidra installation/reinstallation is blocked. Only drdroid78 (62127032) may approve it via workflow_dispatch."
   exit 78
 fi
 
