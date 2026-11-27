@@ -59,11 +59,6 @@ public class DiscoverPointerTables extends GhidraScript {
                             && (getFunctionContaining(target)==null || getFunctionAt(target)!=null)
                             && (getInstructionContaining(target)==null || getInstructionAt(target)!=null)
                             && getDataContaining(target)==null;
-                        // Undefined data can be reported by Ghidra as a Data object; reject only defined data.
-                        if(!valid && dest!=null && dest.isLoaded() && dest.isInitialized() && dest.isExecute()
-                            && (getFunctionContaining(target)==null || getFunctionAt(target)!=null)
-                            && (getInstructionContaining(target)==null || getInstructionAt(target)!=null)
-                            && getDefinedDataContaining(target)==null) valid=true;
                         if(valid){run.add(new Candidate(slot,target)); if(run.size()>=4096)flush(run,out);}
                         else flush(run,out);
                     }
