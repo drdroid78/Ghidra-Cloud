@@ -36,7 +36,7 @@ public class CloudReport extends GhidraScript {
         String[] a = getScriptArgs();
         if (a.length != 4) throw new IllegalArgumentException("report directory, function filter, query, max decompilations");
         Path dir = Paths.get(a[0]); Files.createDirectories(dir);
-        String filter = a[1].toLowerCase(Locale.ROOT), query = a[2].toLowerCase(Locale.ROOT);
+        String filter = a[1].substring(2).toLowerCase(Locale.ROOT), query = a[2].substring(2).toLowerCase(Locale.ROOT);
         int limit = Integer.parseInt(a[3]);
         if (limit < 1 || limit > 5000) throw new IllegalArgumentException("limit 1..5000");
         Listing listing = currentProgram.getListing();
