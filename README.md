@@ -50,3 +50,7 @@ RAW BIN: явно задайте raw_language (например x86:LE:64:defaul
 [Отчёты](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45962026694/artifacts/15181620221) · [Архив проектов](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45962026694/artifacts/15181640142) · [Проверка восстановления на отдельном runner](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45962026694/job/140382384258).
 
 В дополнительных контрольных тестах используются MIPS32, x86-32 и официальная открытая прошивка OpenSBI 1.6 (RISC-V 64): [релиз](https://github.com/riscv-software-src/opensbi/releases/tag/v1.6). Исходный BSD-лицензионный текст и идентификаторы файлов сохраняются вместе с отчётами и архивом проекта. Результаты этих тестов см. в журнале соответствующего Actions-запуска.
+
+### Проверка Version Tracking
+
+[Контрольный журнал](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45962747369/job/140384172675): 102 строки совпадений, включая 44 строки сопоставлений функций, 102 строки со статусом ACCEPTED (в разных наборах корреляторов записи могут дублировать одну ассоциацию). Штатная сессия создана, экспорт выполнен. Данный прогон завершился ошибкой позднее, на сборке MIPS-теста, а не на Version Tracking.
