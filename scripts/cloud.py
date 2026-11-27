@@ -356,9 +356,15 @@ def main():
         ra=analyze(a,"a",filt,query,limit,raw,pair=mode=="compare")
         if mode=="compare":
             b=input_path(os.environ["COMPARE_PATH"])
-            rb=analyze(b,"b",filt,query,limit,raw,pair=True)
+            web_compare=bool(os.getenv("UPLOAD_ID"))
+            raw_b=None if web_compare and b.suffix.lower() not in {".bin", ".img", ".rom", ".fw", ".dat"} else raw
+            rb=analyze(b,"b",filt,query,limit,raw_b,pair=True)
             compare(a,b,ra,rb)
-            version_tracking()
+            if not web_compare or info(ra)["LANGUAGE"] == info(rb)["LANGUAGE"]:
+                version_tracking()
+            else:
+                (REPORT/"comparison"/"version-tracking-summary.txt").write_text(
+                    "Native Version Tracking skipped: different Ghidra languages. Both were analyzed independently.\n")
     else: raise ValueError("Unknown mode")
     package()
 

@@ -1,5 +1,5 @@
 name: Ghidra Cloud
-run-name: "${{ github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow }}"
+run-name: "${{ inputs.upload_id != '' && format('upload:{0}{1} {2}', inputs.upload_id, inputs.compare_upload_id != '' && format(':{0}', inputs.compare_upload_id) || '', inputs.mode) || (github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow) }}"
 on:
   issues:
     types: [opened]
@@ -23,6 +23,14 @@ on:
       compare_path:
         description: Second PUBLIC binary (compare mode)
         type: string
+      upload_id:
+        description: Verified private upload identifier
+        type: string
+        default: ''
+      compare_upload_id:
+        description: Second private upload identifier
+        type: string
+        default: ''
       function_filter:
         description: Function name or address substring; * = all
         type: string
@@ -103,13 +111,22 @@ jobs:
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "libstardroid.so" --dir uploads --clobber
           test -s uploads/libstardroid.so
           echo "INPUT_PATH=uploads/libstardroid.so" >> "$GITHUB_ENV"
+      - name: Receive private uploads and verify SHA-256
+        if: inputs.upload_id != '' && inputs.mode != 'resume'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPLOAD_ID: ${{ inputs.upload_id }}
+          COMPARE_UPLOAD_ID: ${{ inputs.compare_upload_id }}
+          UPLOAD_WORKFLOW: ghidra-cloud
+        run: python3 scripts/upload_input.py
       - name: Install verified Ghidra
         run: bash scripts/install.sh
       - name: Run static analysis and verification
         env:
           GH_TOKEN: ${{ (inputs.mode == 'resume' || steps.request.outputs.mode == 'resume') && github.token || '' }}
+          UPLOAD_ID: ${{ inputs.upload_id }}
         run: python3 -u scripts/cloud.py
-      - name: Save public evidence
+      - name: Save analysis evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -117,13 +134,31 @@ jobs:
           path: ${{ runner.temp }}/ghidra-cloud/report/
           retention-days: 14
           if-no-files-found: ignore
-      - name: Save reusable public project
+      - name: Save reusable project
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ghidra-project
           path: ${{ runner.temp }}/ghidra-cloud/ghidra-project.tar.gz
           retention-days: 14
           if-no-files-found: error
+  cleanup-uploads:
+    if: always() && inputs.upload_id != '' && inputs.mode != 'resume' && github.event.repository.private
+    needs: analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Remove temporary inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPLOAD_ID: ${{ inputs.upload_id }}
+          COMPARE_UPLOAD_ID: ${{ inputs.compare_upload_id }}
+          PURGE_INPUTS: '1'
+        run: python3 scripts/upload_input.py
   verify-persistence:
     if: github.event_name == 'push' || inputs.mode == 'selftest'
     needs: analyze

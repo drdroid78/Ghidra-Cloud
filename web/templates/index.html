@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ghidra Cloud — исследования файлов</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <a href="/" class="brand"><span></span>Ghidra Cloud</a>
+    <button id="logout" class="quiet" hidden>Выйти</button>
+  </header>
+  <main>
+    <section id="login-panel" class="panel login">
+      <h1>Вход в Ghidra Cloud</h1>
+      <form id="login">
+        <label for="password">Ключ доступа</label>
+        <div class="toolbar">
+          <input type="password" id="password" required autocomplete="current-password">
+          <button class="primary">Войти</button>
+        </div>
+      </form>
+    </section>
+    <p id="message" class="message" role="status" aria-live="polite" hidden></p>
+    <div id="workspace" hidden>
+      <h1>Исследования файлов</h1>
+      <section class="panel">
+        <h2>Загрузка</h2>
+        <label class="drop" id="drop" for="picker">
+          <strong>Перетащите файлы сюда</strong>
+          <span>До 100 МиБ на файл</span>
+        </label>
+        <input id="picker" type="file" multiple>
+        <ul id="queue" class="rows" aria-label="Файлы для загрузки"></ul>
+        <label class="checkbox"><input type="checkbox" id="keep" checked> Хранить исходники для повторного запуска</label>
+        <details>
+          <summary>Параметры RAW для Ghidra</summary>
+          <div class="fields">
+            <label>Language ID <input id="raw_language" placeholder="x86:LE:64:default"></label>
+            <label>Базовый адрес <input id="raw_base" placeholder="0x100000"></label>
+            <label>Точка входа <input id="raw_entry" placeholder="0x100000"></label>
+            <label>Compiler spec <input id="raw_compiler" placeholder="default"></label>
+          </div>
+        </details>
+        <div class="toolbar">
+          <button class="primary" id="analyze">Загрузить и анализировать</button>
+          <button id="upload">Только загрузить</button>
+          <button id="compare">Сравнить файлы</button>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Загруженные файлы</h2>
+        <p>Выберите два файла в списке для сравнения.</p>
+        <ul id="uploads" class="rows"></ul>
+      </section>
+      <section class="panel">
+        <h2>Текущие исследования</h2>
+        <ul id="active" class="rows"></ul>
+      </section>
+      <section class="panel">
+        <h2>История</h2>
+        <ul id="history" class="rows"></ul>
+      </section>
+      <dialog id="results">
+        <div class="dialog-head"><h2 id="results-title">Результаты</h2><button id="close-results">Закрыть</button></div>
+        <div id="result-body"></div>
+        <pre id="preview" hidden></pre>
+      </dialog>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,5 +1,5 @@
 name: Reverse Engineering Toolbox
-run-name: "${{ github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow }}"
+run-name: "${{ inputs.upload_id != '' && format('upload:{0} toolbox', inputs.upload_id) || (github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow) }}"
 on:
   issues:
     types: [opened]
@@ -16,6 +16,10 @@ on:
       binary_path:
         description: 'Authorized PUBLIC repository file (up to 100 MiB)'
         type: string
+      upload_id:
+        description: Verified private upload identifier
+        type: string
+        default: ''
       analyzers:
         description: 'auto or comma-separated ghidra,jadx,apktool,binwalk,radare2,yara,capstone,tshark,lief'
         type: string
@@ -75,13 +79,20 @@ jobs:
         env:
           REQUEST_KIND: toolbox
         run: python3 toolbox/issue_request.py
+      - name: Receive private uploads and verify SHA-256
+        if: inputs.upload_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPLOAD_ID: ${{ inputs.upload_id }}
+          UPLOAD_WORKFLOW: toolbox
+        run: python3 scripts/upload_input.py
       - name: Install verified Ghidra
         run: bash scripts/install.sh
       - name: Install eight analyzers
         run: bash toolbox/install.sh
       - name: Run analysis and assertions
         run: python -u toolbox/analyze.py
-      - name: Save public evidence
+      - name: Save analysis evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -96,3 +107,20 @@ jobs:
           path: ${{ runner.temp }}/toolbox/ghidra-projects.tar.gz
           retention-days: 14
           if-no-files-found: ignore
+  cleanup-uploads:
+    if: always() && inputs.upload_id != '' && github.event.repository.private
+    needs: toolbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Remove temporary inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPLOAD_ID: ${{ inputs.upload_id }}
+          PURGE_INPUTS: '1'
+        run: python3 scripts/upload_input.py
