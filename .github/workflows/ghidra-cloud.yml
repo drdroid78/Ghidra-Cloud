@@ -16,6 +16,10 @@ on:
       binary_path:
         description: Authorized PUBLIC repository binary, up to 100 MiB
         type: string
+      release_tag:
+        description: Tag of a GitHub Release containing libstardroid.so
+        type: string
+        default: ''
       compare_path:
         description: Second PUBLIC binary (compare mode)
         type: string
@@ -60,7 +64,8 @@ jobs:
     timeout-minutes: 60
     env:
       MODE: ${{ inputs.mode || 'selftest' }}
-      INPUT_PATH: ${{ inputs.binary_path }}
+      INPUT_PATH: ${{ inputs.release_tag != '' && 'uploads/libstardroid.so' || inputs.binary_path }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
       COMPARE_PATH: ${{ inputs.compare_path }}
       FILTER: ${{ inputs.function_filter || '*' }}
       QUERY: ${{ inputs.query }}
@@ -88,6 +93,14 @@ jobs:
           ref: ${{ steps.request.outputs.source_ref }}
           clean: true
           persist-credentials: false
+      - name: Download temporary binary from GitHub Release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p uploads
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "libstardroid.so" --dir uploads --clobber
+          test -s uploads/libstardroid.so
       - name: Install verified Ghidra
         run: bash scripts/install.sh
       - name: Run static analysis and verification
