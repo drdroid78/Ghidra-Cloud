@@ -81,6 +81,13 @@ jobs:
         env:
           REQUEST_KIND: ghidra
         run: python3 toolbox/issue_request.py
+      - name: Checkout temporary analysis ref
+        if: github.event_name == 'issues' && steps.request.outputs.source_ref != ''
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.request.outputs.source_ref }}
+          clean: true
+          persist-credentials: false
       - name: Install verified Ghidra
         run: bash scripts/install.sh
       - name: Run static analysis and verification
