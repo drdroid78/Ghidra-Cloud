@@ -127,12 +127,15 @@ jobs:
         run: |
           echo "::error::Ghidra cache is missing or invalid. Installation is blocked. Only drdroid78 can approve it with confirm_ghidra_install=true in workflow_dispatch."
           exit 1
-      - name: Prepare Java runtime without changing Ghidra
+      - name: Prepare Java runtime for cached Ghidra
+        if: ${{ steps.ghidra-check.outputs.valid == 'true' }}
         run: bash scripts/prepare-java.sh
       - name: Install Ghidra (explicit owner approval only)
         id: install-ghidra
         if: ${{ steps.ghidra-check.outputs.valid != 'true' && github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true }}
         env:
+          GHIDRA_APPROVAL_EVENT: ${{ github.event_name }}
+          GHIDRA_APPROVED_BY_ID: ${{ github.actor_id }}
           GHIDRA_INSTALL_APPROVAL: ${{ github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true && 'PAVEL_CONFIRMED_GHIDRA_12_2_INSTALL' || '' }}
         run: bash scripts/install.sh
       - name: Verify protected Ghidra installation
@@ -199,12 +202,15 @@ jobs:
         run: |
           echo "::error::Ghidra cache is missing or invalid. Installation is blocked. Only drdroid78 can approve it with confirm_ghidra_install=true in workflow_dispatch."
           exit 1
-      - name: Prepare Java runtime without changing Ghidra
+      - name: Prepare Java runtime for cached Ghidra
+        if: ${{ steps.ghidra-check.outputs.valid == 'true' }}
         run: bash scripts/prepare-java.sh
       - name: Install Ghidra (explicit owner approval only)
         id: install-ghidra
         if: ${{ steps.ghidra-check.outputs.valid != 'true' && github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true }}
         env:
+          GHIDRA_APPROVAL_EVENT: ${{ github.event_name }}
+          GHIDRA_APPROVED_BY_ID: ${{ github.actor_id }}
           GHIDRA_INSTALL_APPROVAL: ${{ github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true && 'PAVEL_CONFIRMED_GHIDRA_12_2_INSTALL' || '' }}
         run: bash scripts/install.sh
       - name: Verify protected Ghidra installation
