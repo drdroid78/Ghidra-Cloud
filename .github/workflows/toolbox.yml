@@ -1,5 +1,5 @@
 name: Reverse Engineering Toolbox
-run-name: ${{ github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow }}
+run-name: "${{ github.event_name == 'issues' && format('Owner request #{0}', github.event.issue.number) || github.workflow }}"
 on:
   issues:
     types: [opened]
