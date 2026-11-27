@@ -261,7 +261,10 @@ int main(void) { return cloud_caller(5); }
     src.write_text("volatile int x=5; __attribute__((noinline)) int probe(int v){return v*3+7;} int entry(void){return probe(x);}")
     for target,label,arch in [("armv7-none-eabi","arm32","ARM"),("aarch64-linux-gnu","arm64","AARCH64"),("mipsel-none-elf","mips32","MIPS"),("i386-linux-gnu","x86_32","X86")]:
         elf=fixture/f"{label}.elf"
-        cmd("clang",f"--target={target}","-fuse-ld=lld","-nostdlib","-static","-fno-stack-protector","-O1","-Wl,-e,entry","-Wl,--strip-all","-o",elf,src)
+        obj=fixture/f"{label}.o"
+        extra=["-mno-abicalls","-fno-pic","-G0"] if label=="mips32" else []
+        cmd("clang",f"--target={target}","-ffreestanding","-fno-stack-protector","-O1",*extra,"-c","-o",obj,src)
+        cmd("ld.lld","-e","entry","--strip-all","-static","-o",elf,obj)
         r=analyze(elf,label,"*","",200)
         s=info(r)
         assert s["LANGUAGE"].upper().startswith(arch+":") and int(s["DECOMPILED"])>0,s
