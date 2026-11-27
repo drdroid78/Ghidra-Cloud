@@ -86,3 +86,5 @@ RAW BIN: явно задайте raw_language (например x86:LE:64:defaul
 ### Проверка Toolbox — 27.11.2026
 
 [Контрольный запуск 45964032066](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45964032066) завершён успешно: `TOOLBOX_SELFTEST_PASSED nine analyzers + routing + extraction`. Проверены все девять анализаторов на синтетических ELF, APK, PCAP и бинарнике с gzip. Версии: Ghidra 12.2, JADX 1.5.7, Apktool 3.0.3, Binwalk 2.3.4, radare2 6.2.6, YARA 4.5.0, Capstone 5.0.6, TShark 4.2.2, LIEF 0.16.6. [Отчёты](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45964032066/artifacts/15181478624) · [Проекты Ghidra](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45964032066/artifacts/15181428712).
+
+Регрессионная проверка после интеграции Toolbox: [запуск 45964032075](https://github.com/drdroid78/Ghidra-Cloud/actions/runs/45964032075) — оба задания успешны, `SELF_TEST_PASSED` и `CROSS_RUNNER_RESTORE_PASSED`. Version Tracking, 265/265 функций в контрольном ELF, анализ OpenSBI и восстановление проекта на отдельном исполнителе сохранены.
