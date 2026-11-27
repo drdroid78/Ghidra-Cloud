@@ -3,9 +3,6 @@ run-name: "${{ github.event_name == 'issues' && format('Owner request #{0}', git
 on:
   issues:
     types: [opened]
-  push:
-    branches: [main]
-    paths: ['toolbox/**', '.github/workflows/toolbox.yml']
   workflow_dispatch:
     inputs:
       mode:
@@ -27,6 +24,10 @@ on:
         description: 'Ghidra decompilation attempts (1–5000)'
         type: string
         default: '200'
+      confirm_ghidra_install:
+        description: "PERSONAL APPROVAL: allow Ghidra 12.2 installation only if the verified cache is missing/invalid (repository owner only)"
+        type: boolean
+        default: false
       rules_path:
         description: 'Optional PUBLIC YARA rule file'
         type: string
@@ -75,8 +76,53 @@ jobs:
         env:
           REQUEST_KIND: toolbox
         run: python3 toolbox/issue_request.py
-      - name: Install verified Ghidra
+      - name: Restore verified Ghidra 12.2 cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/ghidra-cloud/ghidra_12.2_PUBLIC
+          key: ghidra-12.2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ghidra-12.2-${{ runner.os }}-
+      - name: Check cached Ghidra integrity
+        id: ghidra-check
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/ghidra-cloud/ghidra_12.2_PUBLIC"
+          expected="2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67"
+          if [[ -x "$dir/support/analyzeHeadless" && -f "$dir/.ghidra-cloud-verified" && "$(cat "$dir/.ghidra-cloud-verified")" == "$expected" ]]; then
+            echo "valid=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Block Ghidra installation without Pavel's approval
+        if: ${{ steps.ghidra-check.outputs.valid != 'true' && !(github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true) }}
+        run: |
+          echo "::error::Ghidra cache is missing or invalid. Installation is blocked. Only drdroid78 can approve it with confirm_ghidra_install=true in workflow_dispatch."
+          exit 1
+      - name: Prepare Java runtime for cached Ghidra
+        if: ${{ steps.ghidra-check.outputs.valid == 'true' }}
+        run: bash scripts/prepare-java.sh
+      - name: Install Ghidra (explicit owner approval only)
+        id: install-ghidra
+        if: ${{ steps.ghidra-check.outputs.valid != 'true' && github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true }}
+        env:
+          GHIDRA_APPROVAL_EVENT: ${{ github.event_name }}
+          GHIDRA_APPROVED_BY_ID: ${{ github.actor_id }}
+          GHIDRA_INSTALL_APPROVAL: ${{ github.event_name == 'workflow_dispatch' && github.actor_id == '62127032' && inputs.confirm_ghidra_install == true && 'PAVEL_CONFIRMED_GHIDRA_12_2_INSTALL' || '' }}
         run: bash scripts/install.sh
+      - name: Verify protected Ghidra installation
+        id: verify-ghidra
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/ghidra-cloud/ghidra_12.2_PUBLIC"
+          test -x "$dir/support/analyzeHeadless"
+          test "$(cat "$dir/.ghidra-cloud-verified")" = "2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67"
+      - name: Save approved Ghidra cache
+        if: ${{ steps.install-ghidra.outcome == 'success' && steps.verify-ghidra.outcome == 'success' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/ghidra-cloud/ghidra_12.2_PUBLIC
+          key: ghidra-12.2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Install eight analyzers
         run: bash toolbox/install.sh
       - name: Run analysis and assertions
