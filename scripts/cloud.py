@@ -176,7 +176,8 @@ def restore(run_id):
         raise ValueError("Invalid run ID")
     repo=os.environ["GITHUB_REPOSITORY"]
     meta=json.loads(subprocess.check_output(["gh","api",f"repos/{repo}/actions/runs/{run_id}"]))
-    if (meta.get("conclusion")!="success" or meta.get("head_branch")!="main"
+    same_run = run_id == os.environ.get("GITHUB_RUN_ID") and os.getenv("MODE") == "resume_test" and meta.get("status") == "in_progress"
+    if ((meta.get("conclusion")!="success" and not same_run) or meta.get("head_branch")!="main"
         or meta.get("path")!=".github/workflows/ghidra-cloud.yml" or meta.get("head_repository",{}).get("full_name")!=repo):
         raise ValueError("Restore only successful main-branch runs of this workflow")
     download=WORK/"restore"
@@ -246,13 +247,17 @@ def main():
         raise ValueError("Search parameters must be single line, at most 512 characters")
     mode=os.getenv("MODE","selftest") or "selftest"
     if mode=="selftest": selftest()
-    elif mode=="resume":
+    elif mode in ("resume","resume_test"):
         restore(os.environ["RESUME_RUN"])
         label=os.getenv("RESUME_LABEL","a") or "a"
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}",label): raise ValueError("Invalid project label")
         name=json.loads((PROJECT/label/"input.json").read_text())["name"]
         os.environ.pop("GH_TOKEN",None)
-        analyze(name,label,filt,query,limit,resume=True)
+        result=analyze(name,label,filt,query,limit,resume=True)
+        if mode=="resume_test":
+            assert any(x["kind"]=="constant" for x in read_tsv(result/"matches.tsv"))
+            assert any(x["name"]=="cloud_probe" for x in read_tsv(result/"functions.tsv"))
+            print("CROSS_RUNNER_RESTORE_PASSED",flush=True)
     elif mode in ("analyze","compare"):
         a=input_path(os.environ["INPUT_PATH"])
         language=os.getenv("RAW_LANGUAGE","")
